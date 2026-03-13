@@ -52,198 +52,446 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <title>图片编辑与AI生成应用</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Serif+4:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap');
+        
         * {
             box-sizing: border-box;
         }
+        
         body {
             margin: 0;
-            padding: 20px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f5;
+            padding: 0;
+            font-family: 'Source Serif 4', Georgia, serif;
+            background: #FFFFFF;
+            color: #000000;
+            position: relative;
         }
+        
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1000;
+            background: repeating-linear-gradient(
+                0deg,
+                #000000 0px,
+                #000000 1px,
+                transparent 1px,
+                transparent 8px
+            );
+            opacity: 0.015;
+        }
+        
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1001;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+            opacity: 0.02;
+        }
+        
+        .header {
+            padding: 48px 24px 32px;
+            border-bottom: 4px solid #000000;
+        }
+        
         h1 {
+            font-family: 'Playfair Display', Georgia, serif;
+            font-size: 4rem;
+            font-weight: 600;
+            letter-spacing: -0.05em;
+            line-height: 1;
+            margin: 0;
             text-align: center;
-            color: #333;
-            margin-bottom: 30px;
         }
+        
         .container {
-            display: flex;
-            gap: 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 0;
             max-width: 1600px;
             margin: 0 auto;
+            position: relative;
+            z-index: 1;
         }
+        
         .column {
-            flex: 1;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 40px 32px;
+            border-right: 1px solid #000000;
         }
+        
+        .column:last-child {
+            border-right: none;
+        }
+        
         h2 {
-            color: #333;
-            margin-top: 0;
-            font-size: 18px;
+            font-family: 'Playfair Display', Georgia, serif;
+            font-size: 2rem;
+            font-weight: 600;
+            letter-spacing: -0.025em;
+            margin: 0 0 24px 0;
+            padding-bottom: 16px;
+            border-bottom: 2px solid #000000;
         }
+        
+        h3 {
+            font-family: 'Playfair Display', Georgia, serif;
+            font-size: 1.5rem;
+            font-weight: 600;
+            letter-spacing: -0.025em;
+            margin: 32px 0 16px 0;
+        }
+        
         .upload-section {
-            margin-bottom: 20px;
+            margin-bottom: 24px;
         }
+        
         input[type="file"] {
-            margin-bottom: 10px;
+            font-family: 'Source Serif 4', Georgia, serif;
+            font-size: 1rem;
+            padding: 12px 0;
+            cursor: pointer;
         }
+        
         .image-container {
             position: relative;
             display: inline-block;
             max-width: 100%;
-            margin: 10px 0;
+            margin: 16px 0;
+            border: 2px solid #000000;
         }
+        
         #image {
             max-width: 100%;
             display: block;
         }
+        
         #canvas {
             position: absolute;
             top: 0;
             left: 0;
             cursor: crosshair;
         }
+        
         .controls {
-            margin-top: 10px;
+            margin-top: 16px;
         }
+        
         .info {
-            font-family: monospace;
-            background: #f5f5f5;
-            padding: 8px;
-            border-radius: 4px;
-            margin-top: 5px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            background: #FFFFFF;
+            border: 1px solid #000000;
+            padding: 12px;
+            margin-top: 8px;
             word-break: break-all;
+            letter-spacing: 0.1em;
         }
+        
         .hint {
-            font-size: 14px;
-            color: #666;
-            margin: 5px 0;
+            font-size: 0.9rem;
+            color: #525252;
+            margin: 8px 0;
+            line-height: 1.625;
         }
+        
         button {
-            padding: 8px 16px;
-            background: #1677FF;
-            color: white;
+            font-family: 'Source Serif 4', Georgia, serif;
+            font-size: 0.875rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 16px 32px;
+            background: #000000;
+            color: #FFFFFF;
             border: none;
-            border-radius: 4px;
+            border-radius: 0;
             cursor: pointer;
-            margin-right: 10px;
-            margin-top: 5px;
+            margin: 8px 8px 8px 0;
+            transition: all 100ms ease;
         }
+        
         button:hover {
-            background: #0958d9;
+            background: #FFFFFF;
+            color: #000000;
+            border: 2px solid #000000;
+            padding: 14px 30px;
         }
+        
         button.secondary {
-            background: #f0f0f0;
-            color: #333;
+            background: transparent;
+            color: #000000;
+            border: 2px solid #000000;
+            padding: 14px 30px;
         }
+        
         button.secondary:hover {
-            background: #d9d9d9;
+            background: #000000;
+            color: #FFFFFF;
+            border: 2px solid #000000;
         }
+        
+        button.ghost {
+            background: transparent;
+            color: #000000;
+            border: none;
+            padding: 8px 0;
+            text-decoration: none;
+        }
+        
+        button.ghost:hover {
+            text-decoration: underline;
+            text-underline-offset: 4px;
+            padding: 8px 0;
+            border: none;
+            background: transparent;
+        }
+        
         button.danger {
-            background: #F5222D;
+            background: #000000;
+            color: #FFFFFF;
         }
+        
         button.danger:hover {
-            background: #cf1322;
+            background: #FFFFFF;
+            color: #000000;
+            border: 2px solid #000000;
         }
+        
         .color-picker, .width-picker {
-            margin: 10px 0;
+            margin: 16px 0;
         }
+        
+        label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+        
         select, input[type="text"], textarea {
-            padding: 6px 10px;
-            border-radius: 4px;
-            border: 1px solid #d9d9d9;
-            margin-left: 10px;
-            width: 200px;
+            font-family: 'Source Serif 4', Georgia, serif;
+            font-size: 1rem;
+            padding: 12px 16px;
+            border-radius: 0;
+            border: 2px solid #000000;
+            background: #FFFFFF;
+            color: #000000;
+            margin-left: 12px;
+            width: 100%;
+            max-width: 300px;
+            transition: border-width 100ms ease;
         }
+        
+        select:focus, input[type="text"]:focus, textarea:focus {
+            outline: none;
+            border-width: 4px;
+        }
+        
+        select {
+            cursor: pointer;
+        }
+        
         textarea {
-            height: 80px;
+            min-height: 100px;
             resize: vertical;
         }
+        
+        ::placeholder {
+            color: #525252;
+            font-style: italic;
+        }
+        
         .button-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 10px;
-            background: #f9f9f9;
-            border-radius: 4px;
+            padding: 16px;
+            background: #FFFFFF;
+            border: 1px solid #000000;
             margin-bottom: 8px;
+            transition: all 100ms ease;
         }
+        
+        .button-item:hover {
+            background: #000000;
+            color: #FFFFFF;
+        }
+        
         .button-item span {
             flex: 1;
-            margin-right: 10px;
+            margin-right: 16px;
         }
+        
         .button-item button {
             margin: 0;
+            padding: 8px 16px;
+            font-size: 0.75rem;
         }
-        .result-section {
-            margin-top: 20px;
+        
+        .result-card {
+            background: #FFFFFF;
+            border: 2px solid #000000;
+            padding: 24px;
+            margin-bottom: 24px;
+            transition: all 300ms ease;
         }
+        
+        .result-card:hover {
+            border-width: 4px;
+        }
+        
+        .result-card h4 {
+            font-family: 'Playfair Display', Georgia, serif;
+            font-size: 1.5rem;
+            font-weight: 600;
+            letter-spacing: -0.025em;
+            margin: 0 0 16px 0;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #000000;
+        }
+        
         .result-content {
-            background: #f9f9f9;
-            padding: 15px;
-            border-radius: 4px;
+            background: #FFFFFF;
+            padding: 0;
             white-space: pre-wrap;
             word-break: break-word;
+            line-height: 1.625;
         }
+        
+        .result-content img {
+            max-width: 100%;
+            height: auto;
+            margin: 16px 0;
+            border: 2px solid #000000;
+            transition: all 300ms ease;
+        }
+        
+        .result-content img:hover {
+            border-width: 4px;
+            transform: scale(1.05);
+        }
+        
         .loading {
             display: none;
             text-align: center;
-            padding: 20px;
+            padding: 40px;
         }
+        
         .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #1677FF;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            border: 3px solid #FFFFFF;
+            border-top: 3px solid #000000;
+            border-radius: 0;
+            width: 48px;
+            height: 48px;
             animation: spin 1s linear infinite;
-            margin: 0 auto 10px;
+            margin: 0 auto 16px;
         }
+        
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        
         .expander {
-            margin-bottom: 15px;
+            margin-bottom: 24px;
         }
+        
         .expander-header {
             cursor: pointer;
-            padding: 10px;
-            background: #f0f0f0;
-            border-radius: 4px;
+            padding: 16px;
+            background: #FFFFFF;
+            border: 2px solid #000000;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            transition: all 100ms ease;
         }
+        
+        .expander-header:hover {
+            background: #000000;
+            color: #FFFFFF;
+        }
+        
+        .expander-header span:first-child {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+        
         .expander-content {
-            padding: 15px;
-            border: 1px solid #f0f0f0;
+            padding: 24px;
+            border: 2px solid #000000;
             border-top: none;
-            border-radius: 0 0 4px 4px;
+            background: #FFFFFF;
         }
+        
         .generate-buttons {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+        
+        .generate-buttons button {
+            width: 100%;
+            margin: 0;
+        }
+        
+        .section-divider {
+            height: 4px;
+            background: #000000;
+            margin: 48px 0;
+        }
+        
+        .grid-texture {
+            background-image: 
+                linear-gradient(rgba(0,0,0,0.015) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,0,0,0.015) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        
+        .inverse {
+            background: #000000;
+            color: #FFFFFF;
+        }
+        
+        .inverse button {
+            background: #FFFFFF;
+            color: #000000;
+        }
+        
+        .inverse button:hover {
+            background: #000000;
+            color: #FFFFFF;
+            border: 2px solid #FFFFFF;
         }
     </style>
 </head>
 <body>
-    <h1>📷 图片编辑与AI生成应用</h1>
+    <div class="header">
+        <h1>图片编辑与AI生成</h1>
+    </div>
     <div class="container">
         <!-- 第一列：上传和框选 -->
         <div class="column">
-            <h2>📁 上传图片</h2>
+            <h2>上传图片</h2>
             <div class="upload-section">
                 <input type="file" id="fileInput" accept="image/png,image/jpg,image/jpeg">
             </div>
             
             <div id="imageSection" style="display:none;">
                 <div class="color-picker">
-                    <label>颜色:</label>
+                    <label>颜色</label>
                     <select id="colorSelect">
                         {% for i in range(colors|length) %}
                         <option value="{{ colors[i] }}">{{ color_names[i] }}</option>
@@ -251,7 +499,7 @@ HTML_TEMPLATE = """
                     </select>
                 </div>
                 <div class="width-picker">
-                    <label>粗细:</label>
+                    <label>粗细</label>
                     <select id="widthSelect">
                         {% for i in range(widths|length) %}
                         <option value="{{ widths[i] }}">{{ width_names[i] }} ({{ widths[i] }}px)</option>
@@ -274,9 +522,9 @@ HTML_TEMPLATE = """
 
         <!-- 第二列：生成结果 -->
         <div class="column">
-            <h2>👁️ 生成结果预览</h2>
-            <div style="margin-bottom:10px;">
-                <button id="clearAllResults" class="secondary" onclick="clearAllResults()" style="display:none;">🗑️ 清除所有结果</button>
+            <h2>生成结果</h2>
+            <div style="margin-bottom:16px;">
+                <button id="clearAllResults" class="ghost" onclick="clearAllResults()" style="display:none;">清除所有结果</button>
             </div>
             <div id="loading" class="loading">
                 <div class="spinner"></div>
@@ -289,7 +537,7 @@ HTML_TEMPLATE = """
 
         <!-- 第三列：设置 -->
         <div class="column">
-            <h2>⚙️ 设置</h2>
+            <h2>设置</h2>
             
             <div class="expander">
                 <div class="expander-header" onclick="toggleExpander('api')">
@@ -297,37 +545,37 @@ HTML_TEMPLATE = """
                     <span id="apiToggle">▼</span>
                 </div>
                 <div id="apiContent" class="expander-content">
-                    <div style="margin:10px 0;">
-                        <label>API Key:</label>
-                        <div style="display:flex;align-items:center;">
-                            <input type="text" id="apiKey" value="{{ api_config.api_key }}" style="flex:1;margin-right:10px;">
-                            <button type="button" onclick="toggleApiKeyVisibility()" id="toggleKeyBtn" style="padding:6px 10px;margin:0;">👁️</button>
+                    <div style="margin:16px 0;">
+                        <label>API Key</label>
+                        <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
+                            <input type="text" id="apiKey" value="{{ api_config.api_key }}" style="flex:1;margin:0;max-width:none;">
+                            <button type="button" onclick="toggleApiKeyVisibility()" id="toggleKeyBtn" style="padding:12px 16px;margin:0;">显示</button>
                         </div>
                     </div>
-                    <div style="margin:10px 0;">
-                        <label>API URL:</label>
-                        <input type="text" id="apiUrl" value="{{ api_config.api_url }}">
+                    <div style="margin:16px 0;">
+                        <label>API URL</label>
+                        <input type="text" id="apiUrl" value="{{ api_config.api_url }}" style="margin-top:8px;max-width:none;">
                     </div>
-                    <div style="margin:10px 0;">
-                        <label>Model:</label>
-                        <input type="text" id="apiModel" value="{{ api_config.model }}">
+                    <div style="margin:16px 0;">
+                        <label>Model</label>
+                        <input type="text" id="apiModel" value="{{ api_config.model }}" style="margin-top:8px;max-width:none;">
                     </div>
                 </div>
             </div>
 
             <div class="expander">
                 <div class="expander-header" onclick="toggleExpander('addBtn')">
-                    <span>➕ 添加新功能按钮</span>
+                    <span>添加新功能</span>
                     <span id="addBtnToggle">▼</span>
                 </div>
                 <div id="addBtnContent" class="expander-content">
-                    <div style="margin:10px 0;">
-                        <label>按钮名字:</label>
-                        <input type="text" id="newBtnName" placeholder="输入按钮名字">
+                    <div style="margin:16px 0;">
+                        <label>按钮名称</label>
+                        <input type="text" id="newBtnName" placeholder="输入按钮名称" style="margin-top:8px;max-width:none;">
                     </div>
-                    <div style="margin:10px 0;">
-                        <label>提示词:</label>
-                        <textarea id="newBtnPrompt" placeholder="输入提示词"></textarea>
+                    <div style="margin:16px 0;">
+                        <label>提示词</label>
+                        <textarea id="newBtnPrompt" placeholder="输入提示词" style="margin-top:8px;max-width:none;"></textarea>
                     </div>
                     <button id="saveBtn">保存按钮</button>
                 </div>
@@ -335,14 +583,14 @@ HTML_TEMPLATE = """
 
             <div class="expander">
                 <div class="expander-header" onclick="toggleExpander('buttonsList')">
-                    <span>📋 已添加的按钮</span>
+                    <span>已添加的按钮</span>
                     <span id="buttonsListToggle">▼</span>
                 </div>
                 <div id="buttonsListContent" class="expander-content">
                     {% if buttons %}
                     {% for i in range(buttons|length) %}
                     <div class="button-item">
-                        <span><strong>{{ buttons[i].name }}:</strong> {{ buttons[i].prompt }}</span>
+                        <span><strong>{{ buttons[i].name }}</strong>: {{ buttons[i].prompt }}</span>
                         <button class="danger" onclick="deleteButton({{ i }})">删除</button>
                     </div>
                     {% endfor %}
@@ -353,7 +601,7 @@ HTML_TEMPLATE = """
             </div>
 
             <div id="generateSection">
-                <h3>🚀 选择功能生成</h3>
+                <h3>选择功能生成</h3>
                 <div id="generateButtons" class="generate-buttons"></div>
             </div>
         </div>
@@ -602,13 +850,10 @@ HTML_TEMPLATE = """
             // 创建加载中的结果卡片
             const loadingDiv = document.createElement('div');
             loadingDiv.id = `loading-${currentResultId}`;
-            loadingDiv.style.marginBottom = '20px';
-            loadingDiv.style.padding = '10px';
-            loadingDiv.style.border = '1px solid #e0e0e0';
-            loadingDiv.style.borderRadius = '8px';
+            loadingDiv.className = 'result-card';
             loadingDiv.innerHTML = `
-                <h4 style="margin-top:0;margin-bottom:10px;">📝 结果 #${currentResultId} <span style="color:#666;font-size:14px;">(生成中...)</span></h4>
-                <div class="loading" style="display:block;padding:20px;">
+                <h4>结果 #${currentResultId} <span style="color:#525252;font-size:1rem;font-weight:400;">(生成中...)</span></h4>
+                <div class="loading" style="display:block;padding:40px;">
                     <div class="spinner"></div>
                     <p>正在生成...</p>
                 </div>
@@ -658,18 +903,18 @@ HTML_TEMPLATE = """
                 if (resultDiv) {
                     if (result.error) {
                         resultDiv.innerHTML = `
-                            <h4 style="margin-top:0;margin-bottom:10px;">📝 结果 #${currentResultId} <span style="color:#F5222D;font-size:14px;">(失败)</span></h4>
-                            <p style="color:red;">错误: ${result.error}</p>
+                            <h4>结果 #${currentResultId} <span style="color:#000000;font-size:1rem;font-weight:400;">(失败)</span></h4>
+                            <p style="color:#000000;font-weight:600;">错误: ${result.error}</p>
                         `;
                     } else if (result.choices) {
                         let content = result.choices[0].message.content;
                         content = content.replace(/<img /g, '<img referrerpolicy="no-referrer" ');
-                        content = content.replace(/!\[.*?\]\(`?([^`\)]+)`?\)/g, '<img src="$1" referrerpolicy="no-referrer" style="max-width:100%;height:auto;margin:10px 0;">');
+                        content = content.replace(/!\[.*?\]\(`?([^`\)]+)`?\)/g, '<img src="$1" referrerpolicy="no-referrer" style="max-width:100%;height:auto;margin:16px 0;">');
                         
                         resultDiv.innerHTML = `
-                            <h4 style="margin-top:0;margin-bottom:10px;">📝 结果 #${currentResultId}</h4>
+                            <h4>结果 #${currentResultId}</h4>
                             <div class="result-content">${content}</div>
-                            <button style="margin-top:10px;" onclick="downloadResultWithContent('${encodeURIComponent(content)}')">📥 下载结果</button>
+                            <button style="margin-top:16px;" onclick="downloadResultWithContent('${encodeURIComponent(content)}')">下载结果</button>
                         `;
                         window[`result_${currentResultId}`] = result;
                     }
@@ -678,8 +923,8 @@ HTML_TEMPLATE = """
                 const resultDiv = document.getElementById(`loading-${currentResultId}`);
                 if (resultDiv) {
                     resultDiv.innerHTML = `
-                        <h4 style="margin-top:0;margin-bottom:10px;">📝 结果 #${currentResultId} <span style="color:#F5222D;font-size:14px;">(失败)</span></h4>
-                        <p style="color:red;">错误: ${e.message}</p>
+                        <h4>结果 #${currentResultId} <span style="color:#000000;font-size:1rem;font-weight:400;">(失败)</span></h4>
+                        <p style="color:#000000;font-weight:600;">错误: ${e.message}</p>
                     `;
                 }
             }
