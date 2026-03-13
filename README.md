@@ -49,25 +49,6 @@ docker pull zhoushu1/ai-image-selection-and-modification
 docker run -d -p 5000:5000 zhoushu1/ai-image-selection-and-modification
 ```
 
-#### 查看运行状态
-```bash
-docker ps
-```
-
-#### 查看日志
-```bash
-docker logs <容器ID或别名>
-```
-
-#### 停止容器
-```bash
-docker stop <容器ID或别名>
-```
-
-#### 删除容器
-```bash
-docker rm <容器ID或别名>
-```
 
 ### 方式二：直接运行
 
@@ -117,9 +98,7 @@ python app_complete.py
 
 ## 默认配置
 
-- **API Key**: `sk-muDiVOc0MZmkpSWMLguFlJhmWRq4707fgKDTfMHSsMPctZxi`
-- **API URL**: `https://api.nofx.online/v1/chat/completions`
-- **Model**: `gemini-3.1-flash-image-square`
+- **API Key**: `
 
 ## 技术栈
 
