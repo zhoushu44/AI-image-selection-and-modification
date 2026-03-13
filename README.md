@@ -37,12 +37,46 @@
 
 ## 安装与运行
 
-### 依赖安装
+### 方式一：Docker部署（推荐）
+
+#### 拉取镜像
+```bash
+docker pull zhoushu1/ai-image-selection-and-modification
+```
+
+#### 运行容器
+```bash
+docker run -d -p 5000:5000 zhoushu1/ai-image-selection-and-modification
+```
+
+#### 查看运行状态
+```bash
+docker ps
+```
+
+#### 查看日志
+```bash
+docker logs <容器ID或别名>
+```
+
+#### 停止容器
+```bash
+docker stop <容器ID或别名>
+```
+
+#### 删除容器
+```bash
+docker rm <容器ID或别名>
+```
+
+### 方式二：直接运行
+
+#### 依赖安装
 ```bash
 pip install flask requests pillow
 ```
 
-### 启动应用
+#### 启动应用
 ```bash
 python app_complete.py
 ```
@@ -99,11 +133,6 @@ python app_complete.py
 ```
 图片编辑/
 ├── app_complete.py      # 主应用文件
-├── test_api.py          # API测试脚本
-├── test_new_api.py      # 新API测试
-├── test_stream.py       # 流式API测试
-├── test_image_gen.py    # 图片生成测试
-├── test_image_edit.py   # 图片编辑测试
 ├── requirements.txt     # 依赖列表
 ├── 1.jpeg              # 测试图片
 └── README.md           # 说明文档
