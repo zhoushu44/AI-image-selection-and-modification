@@ -1,4 +1,4 @@
-streamlit
 flask
 requests
 pillow
+supabase==2.8.1
