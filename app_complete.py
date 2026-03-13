@@ -1,22 +1,48 @@
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for
 from PIL import Image, ImageDraw
 import requests
 import base64
 import io
 import json
 import os
+from supabase import create_client, Client
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)
 
-# 配置
-API_CONFIG = {
-    "api_key": "sk-muDiVOc0MZmkpSWMLguFlJhmWRq4707fgKDTfMHSsMPctZxi",
-    "api_url": "https://api.nofx.online/v1/chat/completions",
-    "model": "gemini-3.1-flash-image-square"
-}
+# Supabase 配置（请替换为你自己的密钥）
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://your-project.supabase.co")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "your-anon-key")
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "your-secret-key")
+try:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    supabase_admin: Client = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
+except Exception as e:
+    print(f"Supabase 初始化警告: {e}")
+    supabase = None
+    supabase_admin = None
+
+# 从数据库获取 API 配置
+def get_api_config():
+    """从数据库获取 API 配置"""
+    try:
+        response = supabase_admin.table('api_config').select('*').order('created_at', desc=True).limit(1).execute()
+        if response.data and len(response.data) > 0:
+            return {
+                "api_key": response.data[0]['api_key'],
+                "api_url": response.data[0]['api_url'],
+                "model": response.data[0]['model']
+            }
+    except Exception as e:
+        print(f"获取 API 配置错误: {e}")
+    # 默认配置
+    return {
+        "api_key": "sk-muDiVOc0MZmkpSWMLguFlJhmWRq4707fgKDTfMHSsMPctZxi",
+        "api_url": "https://api.nofx.online/v1/chat/completions",
+        "model": "gemini-3.1-flash-image-square"
+    }
 
 # 状态存储
-buttons = []
 current_image = None
 current_image_bytes = None
 current_coords = None
@@ -44,6 +70,364 @@ COLOR_NAMES = [
 
 WIDTHS = [3, 6, 10]
 WIDTH_NAMES = ["细", "中", "粗"]
+
+LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>登录 / 注册</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Serif+4:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap');
+        
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Source Serif 4', Georgia, serif;
+            background: #FFFFFF;
+            color: #000000;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+        
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1000;
+            background: repeating-linear-gradient(
+                0deg,
+                #000000 0px,
+                #000000 1px,
+                transparent 1px,
+                transparent 8px
+            );
+            opacity: 0.015;
+        }
+        
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1001;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+            opacity: 0.02;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 480px;
+            padding: 64px 48px;
+            border: 2px solid #000000;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 48px;
+            padding-bottom: 24px;
+            border-bottom: 4px solid #000000;
+        }
+        
+        h1 {
+            font-family: 'Playfair Display', Georgia, serif;
+            font-size: 3rem;
+            font-weight: 600;
+            letter-spacing: -0.05em;
+            line-height: 1;
+            margin: 0 0 16px 0;
+        }
+        
+        h2 {
+            font-family: 'Playfair Display', Georgia, serif;
+            font-size: 1.75rem;
+            font-weight: 600;
+            letter-spacing: -0.025em;
+            margin: 0 0 32px 0;
+            text-align: center;
+        }
+        
+        .tab-container {
+            display: flex;
+            margin-bottom: 32px;
+            border-bottom: 2px solid #000000;
+        }
+        
+        .tab {
+            flex: 1;
+            padding: 16px;
+            text-align: center;
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            transition: all 100ms ease;
+            border-bottom: 4px solid transparent;
+        }
+        
+        .tab.active {
+            background: #000000;
+            color: #FFFFFF;
+            border-bottom: 4px solid #000000;
+        }
+        
+        .tab:hover:not(.active) {
+            background: #f0f0f0;
+        }
+        
+        .form-group {
+            margin-bottom: 24px;
+        }
+        
+        label {
+            display: block;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 16px;
+            font-family: 'Source Serif 4', Georgia, serif;
+            font-size: 1rem;
+            border: 2px solid #000000;
+            border-radius: 0;
+            background: #FFFFFF;
+            color: #000000;
+            transition: border-width 100ms ease;
+        }
+        
+        input[type="email"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-width: 4px;
+        }
+        
+        ::placeholder {
+            color: #525252;
+            font-style: italic;
+        }
+        
+        button {
+            width: 100%;
+            font-family: 'Source Serif 4', Georgia, serif;
+            font-size: 0.875rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 16px 32px;
+            background: #000000;
+            color: #FFFFFF;
+            border: none;
+            border-radius: 0;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: all 100ms ease;
+        }
+        
+        button:hover {
+            background: #FFFFFF;
+            color: #000000;
+            border: 2px solid #000000;
+            padding: 14px 30px;
+        }
+        
+        .error {
+            background: #000000;
+            color: #FFFFFF;
+            padding: 16px;
+            margin-bottom: 24px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            letter-spacing: 0.05em;
+        }
+        
+        .success {
+            background: #000000;
+            color: #FFFFFF;
+            padding: 16px;
+            margin-bottom: 24px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            letter-spacing: 0.05em;
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>图片编辑</h1>
+        </div>
+        
+        <div id="errorMessage" class="error hidden"></div>
+        <div id="successMessage" class="success hidden"></div>
+        
+        <div class="tab-container">
+            <div class="tab active" onclick="switchTab('login')">登录</div>
+            <div class="tab" onclick="switchTab('register')">注册</div>
+        </div>
+        
+        <div id="loginForm">
+            <h2>欢迎回来</h2>
+            <div class="form-group">
+                <label>邮箱</label>
+                <input type="email" id="loginEmail" placeholder="请输入邮箱">
+            </div>
+            <div class="form-group">
+                <label>密码</label>
+                <input type="password" id="loginPassword" placeholder="请输入密码">
+            </div>
+            <button onclick="handleLogin()">登录</button>
+        </div>
+        
+        <div id="registerForm" class="hidden">
+            <h2>创建账户</h2>
+            <div class="form-group">
+                <label>邮箱</label>
+                <input type="email" id="registerEmail" placeholder="请输入邮箱">
+            </div>
+            <div class="form-group">
+                <label>密码</label>
+                <input type="password" id="registerPassword" placeholder="请输入密码（至少6位）">
+            </div>
+            <div class="form-group">
+                <label>确认密码</label>
+                <input type="password" id="registerConfirmPassword" placeholder="请再次输入密码">
+            </div>
+            <button onclick="handleRegister()">注册</button>
+        </div>
+    </div>
+    
+    <script>
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('.tab:nth-child(' + (tab === 'login' ? '1' : '2') + ')').classList.add('active');
+            
+            document.getElementById('loginForm').classList.toggle('hidden', tab !== 'login');
+            document.getElementById('registerForm').classList.toggle('hidden', tab !== 'register');
+            
+            hideMessages();
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+            document.getElementById('successMessage').classList.add('hidden');
+        }
+        
+        function showSuccess(message) {
+            const successDiv = document.getElementById('successMessage');
+            successDiv.textContent = message;
+            successDiv.classList.remove('hidden');
+            document.getElementById('errorMessage').classList.add('hidden');
+        }
+        
+        function hideMessages() {
+            document.getElementById('errorMessage').classList.add('hidden');
+            document.getElementById('successMessage').classList.add('hidden');
+        }
+        
+        async function handleLogin() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            if (!email || !password) {
+                showError('请填写所有字段');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showSuccess('登录成功！正在跳转...');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    showError(result.error || '登录失败');
+                }
+            } catch (e) {
+                showError('网络错误，请重试');
+            }
+        }
+        
+        async function handleRegister() {
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            const confirmPassword = document.getElementById('registerConfirmPassword').value;
+            
+            if (!email || !password || !confirmPassword) {
+                showError('请填写所有字段');
+                return;
+            }
+            
+            if (password !== confirmPassword) {
+                showError('两次输入的密码不一致');
+                return;
+            }
+            
+            if (password.length < 6) {
+                showError('密码至少需要6位');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showSuccess('注册成功！请检查邮箱进行验证，验证后即可登录');
+                    switchTab('login');
+                    document.getElementById('loginEmail').value = email;
+                } else {
+                    showError(result.error || '注册失败');
+                }
+            } catch (e) {
+                showError('网络错误，请重试');
+            }
+        }
+    </script>
+</body>
+</html>
+"""
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -99,9 +483,27 @@ HTML_TEMPLATE = """
             opacity: 0.02;
         }
         
+        .nav-bar {
+            position: fixed;
+            top: 0;
+            right: 0;
+            padding: 16px 24px;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .user-info {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.875rem;
+            letter-spacing: 0.05em;
+        }
+        
         .header {
             padding: 48px 24px 32px;
             border-bottom: 4px solid #000000;
+            position: relative;
         }
         
         h1 {
@@ -478,6 +880,52 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
+    <div class="nav-bar">
+        <span class="user-info">
+            <button style="background:#000000;color:#FFFFFF;border:none;padding:8px 16px;cursor:pointer;font-family:'JetBrains Mono',monospace;" onclick="openPointsModalSimple();">
+                积分: {{ current_points }}
+            </button>
+        </span>
+        {% if can_claim_daily %}
+        <button id="claimDailyBtn" style="padding:8px 16px;font-size:0.875rem;margin-left:16px;" onclick="claimDailyPoints()">领取每日积分</button>
+        {% endif %}
+        <span class="user-info" style="margin-left:16px;">{{ user_email }}</span>
+        <button class="secondary" onclick="logout()">退出</button>
+    </div>
+    
+    <!-- 积分详情弹窗 -->
+    <div id="pointsModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:2000;">
+        <div style="position:absolute;top:50px;left:50%;transform:translateX(-50%);background:#FFFFFF;border:4px solid #000000;width:90%;max-width:500px;max-height:70vh;overflow-y:auto;">
+            <div style="padding:20px;border-bottom:4px solid #000000;">
+                <h2 style="margin:0;font-family:'Playfair Display',serif;font-size:1.5rem;">积分详情</h2>
+            </div>
+            <div style="padding:20px;">
+                <div style="margin-bottom:20px;padding:16px;border:2px solid #000000;">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:2rem;" id="modalPointsDisplay">{{ current_points }} 积分</div>
+                </div>
+                
+                <div style="margin-bottom:20px;">
+                    <h3 style="margin:0 0 12px 0;font-family:'Playfair Display',serif;">积分规则</h3>
+                    <div style="font-size:0.875rem;line-height:1.8;">
+                        <p>- 新用户注册：自动赠送 10 积分</p>
+                        <p>- 每日领取：每天可免费领取 10 积分</p>
+                        <p>- 生成图片：每次成功生成扣除 2 积分</p>
+                        <p>- 失败退款：生成失败自动退还积分</p>
+                    </div>
+                </div>
+                
+                <div style="margin-bottom:20px;">
+                    <h3 style="margin:0 0 12px 0;font-family:'Playfair Display',serif;">积分明细</h3>
+                    <div id="transactionsList" style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;">
+                        <p style="color:#525252;">加载中...</p>
+                    </div>
+                </div>
+                
+                <button style="width:100%;padding:12px;background:#000000;color:#FFFFFF;border:none;cursor:pointer;" onclick="document.getElementById('pointsModal').style.display='none';">关闭</button>
+            </div>
+        </div>
+    </div>
+    
     <div class="header">
         <h1>图片编辑与AI生成</h1>
     </div>
@@ -540,30 +988,6 @@ HTML_TEMPLATE = """
             <h2>设置</h2>
             
             <div class="expander">
-                <div class="expander-header" onclick="toggleExpander('api')">
-                    <span>API 配置</span>
-                    <span id="apiToggle">▼</span>
-                </div>
-                <div id="apiContent" class="expander-content">
-                    <div style="margin:16px 0;">
-                        <label>API Key</label>
-                        <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
-                            <input type="text" id="apiKey" value="{{ api_config.api_key }}" style="flex:1;margin:0;max-width:none;">
-                            <button type="button" onclick="toggleApiKeyVisibility()" id="toggleKeyBtn" style="padding:12px 16px;margin:0;">显示</button>
-                        </div>
-                    </div>
-                    <div style="margin:16px 0;">
-                        <label>API URL</label>
-                        <input type="text" id="apiUrl" value="{{ api_config.api_url }}" style="margin-top:8px;max-width:none;">
-                    </div>
-                    <div style="margin:16px 0;">
-                        <label>Model</label>
-                        <input type="text" id="apiModel" value="{{ api_config.model }}" style="margin-top:8px;max-width:none;">
-                    </div>
-                </div>
-            </div>
-
-            <div class="expander">
                 <div class="expander-header" onclick="toggleExpander('addBtn')">
                     <span>添加新功能</span>
                     <span id="addBtnToggle">▼</span>
@@ -588,10 +1012,10 @@ HTML_TEMPLATE = """
                 </div>
                 <div id="buttonsListContent" class="expander-content">
                     {% if buttons %}
-                    {% for i in range(buttons|length) %}
-                    <div class="button-item">
-                        <span><strong>{{ buttons[i].name }}</strong>: {{ buttons[i].prompt }}</span>
-                        <button class="danger" onclick="deleteButton({{ i }})">删除</button>
+                    {% for btn in buttons %}
+                    <div class="button-item" data-button-id="{{ btn.id }}">
+                        <span><strong>{{ btn.button_label }}</strong>: {{ btn.prompt_text }}</span>
+                        <button class="danger" onclick="deleteButton('{{ btn.id }}')">删除</button>
                     </div>
                     {% endfor %}
                     {% else %}
@@ -646,19 +1070,133 @@ HTML_TEMPLATE = """
             }
         }
 
-        // 显示/隐藏API Key
-        let apiKeyVisible = true;
-        function toggleApiKeyVisibility() {
-            const apiKeyInput = document.getElementById('apiKey');
-            const toggleBtn = document.getElementById('toggleKeyBtn');
-            if (apiKeyVisible) {
-                apiKeyInput.type = 'password';
-                toggleBtn.textContent = '👁️‍🗨️';
-            } else {
-                apiKeyInput.type = 'text';
-                toggleBtn.textContent = '👁️';
+
+
+        // 退出登录
+        function logout() {
+            fetch('/logout', { method: 'POST' })
+                .then(() => {
+                    window.location.href = '/login';
+                });
+        }
+
+        // 简单的打开积分弹窗函数
+        function openPointsModalSimple() {
+            const modal = document.getElementById('pointsModal');
+            modal.style.display = 'block';
+            loadTransactions();
+        }
+
+        // 打开积分详情弹窗
+        function openPointsModal() {
+            const modal = document.getElementById('pointsModal');
+            modal.style.display = 'block';
+            loadTransactions();
+        }
+
+        // 关闭积分详情弹窗
+        function closePointsModal() {
+            const modal = document.getElementById('pointsModal');
+            modal.style.display = 'none';
+        }
+
+        // 加载积分明细
+        async function loadTransactions() {
+            const listDiv = document.getElementById('transactionsList');
+            try {
+                const response = await fetch('/api/points/transactions');
+                const result = await response.json();
+                
+                if (result.success && result.data && result.data.length > 0) {
+                    let html = '';
+                    result.data.forEach(tx => {
+                        const typeLabels = {
+                            'signup_bonus': '注册赠送',
+                            'daily_claim': '每日领取',
+                            'generation': '生成扣除',
+                            'refund': '失败退款',
+                            'admin_give': '管理员赠送',
+                            'admin_deduct': '管理员扣除'
+                        };
+                        const typeLabel = typeLabels[tx.transaction_type] || tx.transaction_type;
+                        const sign = tx.points_change > 0 ? '+' : '';
+                        const color = tx.points_change > 0 ? '#52C41A' : '#F5222D';
+                        const date = new Date(tx.created_at).toLocaleString('zh-CN');
+                        
+                        html += `
+                            <div style="padding:12px 0;border-bottom:1px solid #d9d9d9;">
+                                <div style="display:flex;justify-content:space-between;align-items:center;">
+                                    <span>${typeLabel}</span>
+                                    <span style="color:${color};font-weight:600;">${sign}${tx.points_change}</span>
+                                </div>
+                                <div style="color:#525252;font-size:0.75rem;margin-top:4px;">
+                                    ${date}
+                                    ${tx.description ? '<br>' + tx.description : ''}
+                                </div>
+                                <div style="color:#525252;font-size:0.75rem;">
+                                    余额: ${tx.balance_after}
+                                </div>
+                            </div>
+                        `;
+                    });
+                    listDiv.innerHTML = html;
+                } else {
+                    listDiv.innerHTML = '<p style="color:#525252;">暂无积分记录</p>';
+                }
+            } catch (e) {
+                listDiv.innerHTML = '<p style="color:#F5222D;">加载失败，请重试</p>';
             }
-            apiKeyVisible = !apiKeyVisible;
+        }
+
+        // 领取每日积分
+        async function claimDailyPoints() {
+            const btn = document.getElementById('claimDailyBtn');
+            btn.disabled = true;
+            btn.textContent = '领取中...';
+            
+            try {
+                const response = await fetch('/api/points/claim-daily', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('pointsDisplay').textContent = '🪙 ' + result.new_balance;
+                    document.getElementById('modalPointsDisplay').textContent = result.new_balance;
+                    btn.style.display = 'none';
+                    alert('领取成功！获得10积分');
+                    loadTransactions();
+                } else {
+                    alert('领取失败: ' + result.error);
+                    btn.disabled = false;
+                    btn.textContent = '领取每日积分';
+                }
+            } catch (e) {
+                alert('网络错误，请重试');
+                btn.disabled = false;
+                btn.textContent = '领取每日积分';
+            }
+        }
+
+        // 刷新积分显示
+        async function refreshPoints() {
+            try {
+                const response = await fetch('/api/points');
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('pointsDisplay').textContent = '🪙 ' + result.data.current_points;
+                    document.getElementById('modalPointsDisplay').textContent = result.data.current_points;
+                    const claimBtn = document.getElementById('claimDailyBtn');
+                    if (claimBtn) {
+                        if (result.data.can_claim_daily) {
+                            claimBtn.style.display = 'inline-block';
+                        } else {
+                            claimBtn.style.display = 'none';
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log('刷新积分失败:', e);
+            }
         }
 
         // 图片上传
@@ -818,11 +1356,11 @@ HTML_TEMPLATE = """
             }
         });
 
-        function deleteButton(index) {
+        function deleteButton(buttonId) {
             fetch('/delete_button', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ index })
+                body: JSON.stringify({ button_id: buttonId })
             }).then(() => {
                 location.reload();
             });
@@ -835,7 +1373,7 @@ HTML_TEMPLATE = """
                     generateButtons.innerHTML = '';
                     buttons.forEach((btn, i) => {
                         const button = document.createElement('button');
-                        button.textContent = btn.name;
+                        button.textContent = btn.button_label;
                         button.onclick = () => generate(i);
                         generateButtons.appendChild(button);
                     });
@@ -887,16 +1425,14 @@ HTML_TEMPLATE = """
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         image: imageData,
-                        button_index: buttonIndex,
-                        api_config: {
-                            api_key: document.getElementById('apiKey').value,
-                            api_url: document.getElementById('apiUrl').value,
-                            model: document.getElementById('apiModel').value
-                        }
+                        button_index: buttonIndex
                     })
                 });
                 
                 const result = await generateResponse.json();
+                
+                // 刷新积分显示
+                refreshPoints();
                 
                 // 更新结果卡片
                 const resultDiv = document.getElementById(`loading-${currentResultId}`);
@@ -970,41 +1506,483 @@ HTML_TEMPLATE = """
 
         // 初始化
         updateGenerateButtons();
+        
+        // 积分弹窗事件绑定
+        document.addEventListener('DOMContentLoaded', function() {
+            const pointsBtn = document.getElementById('pointsButton');
+            const closeModalBtn = document.getElementById('closeModalBtn');
+            const modal = document.getElementById('pointsModal');
+            
+            if (pointsBtn) {
+                pointsBtn.addEventListener('click', function() {
+                    modal.style.display = 'block';
+                    loadTransactions();
+                });
+            }
+            
+            if (closeModalBtn) {
+                closeModalBtn.addEventListener('click', function() {
+                    modal.style.display = 'none';
+                });
+            }
+            
+            if (modal) {
+                modal.addEventListener('click', function(e) {
+                    if (e.target === modal) {
+                        modal.style.display = 'none';
+                    }
+                });
+            }
+        });
     </script>
 </body>
 </html>
 """
 
+# ==================== 积分功能辅助函数 ====================
+
+def get_user_id_from_email(email):
+    """通过邮箱获取用户 ID"""
+    try:
+        response = supabase_admin.auth.admin.list_users()
+        for user in response:
+            if user.email == email:
+                return user.id
+        return None
+    except Exception as e:
+        print(f"获取用户ID错误: {e}")
+        return None
+
+def get_user_points(user_id):
+    """获取用户当前积分"""
+    try:
+        response = supabase_admin.table('user_points').select('*').eq('user_id', user_id).single().execute()
+        if response.data:
+            return response.data
+        return None
+    except Exception as e:
+        print(f"获取用户积分错误: {e}")
+        return None
+
+def check_daily_claim_available(user_id):
+    """检查用户今天是否可以领取每日积分"""
+    try:
+        from datetime import date
+        today = date.today().isoformat()
+        user_points = get_user_points(user_id)
+        if not user_points:
+            return False
+        return user_points.get('last_daily_claim') != today
+    except Exception as e:
+        print(f"检查每日领取错误: {e}")
+        return False
+
+def add_points(user_id, points, transaction_type, description=None, related_id=None):
+    """为用户增加积分"""
+    try:
+        user_points = get_user_points(user_id)
+        if not user_points:
+            return False, "用户积分记录不存在"
+        
+        new_balance = user_points['current_points'] + points
+        new_total_earned = user_points['total_earned'] + (points if points > 0 else 0)
+        new_total_spent = user_points['total_spent'] + (abs(points) if points < 0 else 0)
+        
+        # 更新积分余额
+        update_data = {
+            'current_points': new_balance,
+            'total_earned': new_total_earned,
+            'total_spent': new_total_spent
+        }
+        
+        supabase_admin.table('user_points').update(update_data).eq('user_id', user_id).execute()
+        
+        # 记录交易
+        transaction_data = {
+            'user_id': user_id,
+            'points_change': points,
+            'balance_after': new_balance,
+            'transaction_type': transaction_type,
+            'description': description
+        }
+        if related_id:
+            transaction_data['related_id'] = related_id
+        
+        supabase_admin.table('point_transactions').insert(transaction_data).execute()
+        
+        return True, new_balance
+    except Exception as e:
+        print(f"增加积分错误: {e}")
+        return False, str(e)
+
+def deduct_points(user_id, points, transaction_type, description=None, related_id=None):
+    """扣除用户积分"""
+    user_points = get_user_points(user_id)
+    if not user_points:
+        return False, "用户积分记录不存在"
+    
+    if user_points['current_points'] < points:
+        return False, "积分不足"
+    
+    return add_points(user_id, -points, transaction_type, description, related_id)
+
+def claim_daily_points(user_id):
+    """领取每日积分"""
+    try:
+        if not check_daily_claim_available(user_id):
+            return False, "今天已经领取过了"
+        
+        from datetime import date
+        today = date.today().isoformat()
+        
+        # 先增加积分
+        success, result = add_points(user_id, 10, 'daily_claim', '每日签到领取10积分')
+        if not success:
+            return False, result
+        
+        # 更新每日领取记录
+        supabase_admin.table('user_points').update({'last_daily_claim': today}).eq('user_id', user_id).execute()
+        
+        return True, result
+    except Exception as e:
+        print(f"领取每日积分错误: {e}")
+        return False, str(e)
+
+def create_generation_record(user_id, prompt, image_data=None):
+    """创建生成记录"""
+    try:
+        data = {
+            'user_id': user_id,
+            'prompt': prompt,
+            'status': 'pending'
+        }
+        if image_data:
+            data['image_data'] = image_data
+        
+        response = supabase_admin.table('generation_records').insert(data).execute()
+        if response.data:
+            return response.data[0]['id']
+        return None
+    except Exception as e:
+        print(f"创建生成记录错误: {e}")
+        return None
+
+def update_generation_record(record_id, status, result_image_url=None, error_message=None, points_deducted=None):
+    """更新生成记录"""
+    try:
+        data = {'status': status}
+        if result_image_url:
+            data['result_image_url'] = result_image_url
+        if error_message:
+            data['error_message'] = error_message
+        if points_deducted is not None:
+            data['points_deducted'] = points_deducted
+        if status in ['success', 'failed', 'refunded']:
+            from datetime import datetime
+            data['completed_at'] = datetime.utcnow().isoformat()
+        
+        supabase_admin.table('generation_records').update(data).eq('id', record_id).execute()
+        return True
+    except Exception as e:
+        print(f"更新生成记录错误: {e}")
+        return False
+
+# ==================== 用户按钮配置管理函数 ====================
+
+def check_user_buttons_initialized(user_id):
+    """检查用户是否已初始化按钮配置"""
+    try:
+        response = supabase_admin.table('user_buttons').select('id').eq('user_id', user_id).limit(1).execute()
+        return len(response.data) > 0
+    except Exception as e:
+        print(f"检查用户按钮初始化错误: {e}")
+        return False
+
+def initialize_user_buttons(user_id):
+    """为用户初始化按钮配置（从全局模板复制）"""
+    try:
+        response = supabase_admin.table('global_button_templates').select('*').order('created_at').execute()
+        if response.data:
+            for template in response.data:
+                button_data = {
+                    'user_id': user_id,
+                    'button_label': template['button_label'],
+                    'prompt_text': template['prompt_text'],
+                    'type': 'initial'
+                }
+                supabase_admin.table('user_buttons').insert(button_data).execute()
+        return True
+    except Exception as e:
+        print(f"初始化用户按钮错误: {e}")
+        return False
+
+def get_user_buttons(user_id):
+    """获取用户的按钮配置"""
+    try:
+        response = supabase_admin.table('user_buttons').select('*').eq('user_id', user_id).order('created_at').execute()
+        return response.data
+    except Exception as e:
+        print(f"获取用户按钮错误: {e}")
+        return []
+
+def add_user_button(user_id, button_label, prompt_text):
+    """为用户添加自定义按钮"""
+    try:
+        button_data = {
+            'user_id': user_id,
+            'button_label': button_label,
+            'prompt_text': prompt_text,
+            'type': 'custom'
+        }
+        response = supabase_admin.table('user_buttons').insert(button_data).execute()
+        return True, response.data[0] if response.data else None
+    except Exception as e:
+        print(f"添加用户按钮错误: {e}")
+        return False, str(e)
+
+def delete_user_button(user_id, button_id):
+    """删除用户的按钮"""
+    try:
+        supabase_admin.table('user_buttons').delete().eq('user_id', user_id).eq('id', button_id).execute()
+        return True
+    except Exception as e:
+        print(f"删除用户按钮错误: {e}")
+        return False
+
+# ==================== 登录检查装饰器 ====================
+
+def login_required(f):
+    def decorated_function(*args, **kwargs):
+        if 'user' not in session:
+            return redirect(url_for('login_page'))
+        return f(*args, **kwargs)
+    decorated_function.__name__ = f.__name__
+    return decorated_function
+
+@app.route('/login')
+def login_page():
+    if 'user' in session:
+        return redirect(url_for('index'))
+    return render_template_string(LOGIN_TEMPLATE)
+
+@app.route('/register')
+def register_page():
+    if 'user' in session:
+        return redirect(url_for('index'))
+    return render_template_string(LOGIN_TEMPLATE)
+
+@app.route('/register', methods=['POST'])
+def register():
+    if not supabase:
+        return jsonify({"success": False, "error": "Supabase 未正确配置，请检查 API Key"})
+    
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+    
+    print(f"注册请求 - 邮箱: {email}")
+    
+    try:
+        response = supabase.auth.sign_up({
+            "email": email,
+            "password": password
+        })
+        
+        print(f"注册响应: {response}")
+        print(f"用户信息: {response.user}")
+        print(f"会话信息: {response.session}")
+        
+        return jsonify({"success": True})
+    except Exception as e:
+        print(f"注册错误: {e}")
+        import traceback
+        print(f"错误堆栈: {traceback.format_exc()}")
+        error_msg = str(e)
+        if "Invalid API key" in error_msg:
+            error_msg = "Supabase API Key 无效，请在 Supabase 控制台获取正确的 Anon Key"
+        return jsonify({"success": False, "error": error_msg})
+
+@app.route('/login', methods=['POST'])
+def login():
+    if not supabase:
+        return jsonify({"success": False, "error": "Supabase 未正确配置，请检查 API Key"})
+    
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+    
+    try:
+        response = supabase.auth.sign_in_with_password({
+            "email": email,
+            "password": password
+        })
+        user_id = None
+        if response.user:
+            user_id = str(response.user.id)
+            
+            try:
+                user_points = get_user_points(user_id)
+                if not user_points:
+                    from datetime import date
+                    today = date.today().isoformat()
+                    
+                    user_points_data = {
+                        'user_id': user_id,
+                        'current_points': 10,
+                        'total_earned': 10,
+                        'total_spent': 0,
+                        'last_daily_claim': None
+                    }
+                    supabase_admin.table('user_points').insert(user_points_data).execute()
+                    
+                    transaction_data = {
+                        'user_id': user_id,
+                        'points_change': 10,
+                        'balance_after': 10,
+                        'transaction_type': 'signup_bonus',
+                        'description': '新用户注册赠送10积分'
+                    }
+                    supabase_admin.table('point_transactions').insert(transaction_data).execute()
+            except Exception as e:
+                print(f"登录时初始化用户积分错误: {e}")
+        
+        session['user'] = {
+            'email': email,
+            'user_id': user_id,
+            'access_token': response.session.access_token if response.session else None,
+            'refresh_token': response.session.refresh_token if response.session else None
+        }
+        return jsonify({"success": True})
+    except Exception as e:
+        error_msg = str(e)
+        if "Invalid API key" in error_msg:
+            error_msg = "Supabase API Key 无效，请在 Supabase 控制台获取正确的 Anon Key"
+        return jsonify({"success": False, "error": error_msg})
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.pop('user', None)
+    try:
+        supabase.auth.sign_out()
+    except:
+        pass
+    return jsonify({"success": True})
+
+# ==================== 积分功能路由 ====================
+
+@app.route('/api/points')
+@login_required
+def get_points():
+    """获取用户积分信息"""
+    user_id = session['user'].get('user_id')
+    
+    if not user_id:
+        return jsonify({"success": False, "error": "无法获取用户信息"})
+    
+    user_points = get_user_points(user_id)
+    if not user_points:
+        return jsonify({"success": False, "error": "积分记录不存在"})
+    
+    can_claim_daily = check_daily_claim_available(user_id)
+    
+    return jsonify({
+        "success": True,
+        "data": {
+            "current_points": user_points['current_points'],
+            "total_earned": user_points['total_earned'],
+            "total_spent": user_points['total_spent'],
+            "can_claim_daily": can_claim_daily
+        }
+    })
+
+@app.route('/api/points/claim-daily', methods=['POST'])
+@login_required
+def claim_daily():
+    """领取每日积分"""
+    user_id = session['user'].get('user_id')
+    
+    if not user_id:
+        return jsonify({"success": False, "error": "无法获取用户信息"})
+    
+    success, result = claim_daily_points(user_id)
+    if success:
+        return jsonify({"success": True, "new_balance": result})
+    else:
+        return jsonify({"success": False, "error": result})
+
+@app.route('/api/points/transactions')
+@login_required
+def get_transactions():
+    """获取积分交易记录"""
+    user_id = session['user'].get('user_id')
+    
+    if not user_id:
+        return jsonify({"success": False, "error": "无法获取用户信息"})
+    
+    try:
+        response = supabase_admin.table('point_transactions').select('*').eq('user_id', user_id).order('created_at', desc=True).limit(50).execute()
+        return jsonify({"success": True, "data": response.data})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+# ==================== 主页面 ====================
+
 @app.route('/')
+@login_required
 def index():
+    user_email = session['user']['email']
+    user_id = session['user'].get('user_id')
+    
+    user_points_data = None
+    user_buttons_list = []
+    if user_id:
+        user_points_data = get_user_points(user_id)
+        
+        if not check_user_buttons_initialized(user_id):
+            initialize_user_buttons(user_id)
+        
+        user_buttons_list = get_user_buttons(user_id)
+    
+    current_points = user_points_data['current_points'] if user_points_data else 0
+    can_claim_daily = check_daily_claim_available(user_id) if user_id else False
+    
     return render_template_string(
         HTML_TEMPLATE,
-        api_config=API_CONFIG,
-        buttons=buttons,
+        buttons=user_buttons_list,
         colors=COLORS,
         color_names=COLOR_NAMES,
         widths=WIDTHS,
-        width_names=WIDTH_NAMES
+        width_names=WIDTH_NAMES,
+        user_email=user_email,
+        current_points=current_points,
+        can_claim_daily=can_claim_daily
     )
 
 @app.route('/add_button', methods=['POST'])
+@login_required
 def add_button():
     data = request.json
-    buttons.append({"name": data["name"], "prompt": data["prompt"]})
-    return jsonify({"success": True})
+    user_id = session['user'].get('user_id')
+    success, result = add_user_button(user_id, data["name"], data["prompt"])
+    return jsonify({"success": success, "result": result})
 
 @app.route('/delete_button', methods=['POST'])
+@login_required
 def delete_button():
     data = request.json
-    if 0 <= data["index"] < len(buttons):
-        buttons.pop(data["index"])
-    return jsonify({"success": True})
+    user_id = session['user'].get('user_id')
+    success = delete_user_button(user_id, data["button_id"])
+    return jsonify({"success": success})
 
 @app.route('/get_buttons')
-def get_buttons():
-    return jsonify(buttons)
+@login_required
+def get_buttons_route():
+    user_id = session['user'].get('user_id')
+    buttons_list = get_user_buttons(user_id)
+    return jsonify(buttons_list)
 
 @app.route('/draw_box', methods=['POST'])
+@login_required
 def draw_box():
     data = request.json
     # 解码base64图片
@@ -1030,14 +2008,54 @@ def draw_box():
     return jsonify({"image": new_image_data})
 
 @app.route('/generate', methods=['POST'])
+@login_required
 def generate():
     data = request.json
     button_index = data["button_index"]
-    api_config = data["api_config"]
     image_data = data["image"]
     
+    # 从数据库获取 API 配置
+    api_config = get_api_config()
+    
+    # 获取用户信息
+    user_id = session['user'].get('user_id')
+    
+    if not user_id:
+        return jsonify({"error": "无法获取用户信息"})
+    
+    # 检查积分是否足够
+    user_points = get_user_points(user_id)
+    if not user_points or user_points['current_points'] < 2:
+        return jsonify({"error": "积分不足，请先领取每日积分或充值"})
+    
+    # 获取用户的按钮列表
+    user_buttons_list = get_user_buttons(user_id)
+    if button_index >= len(user_buttons_list):
+        return jsonify({"error": "按钮索引无效"})
+    
     # 获取提示词
-    prompt = buttons[button_index]["prompt"]
+    prompt = user_buttons_list[button_index]["prompt_text"]
+    
+    # 创建生成记录
+    record_id = create_generation_record(user_id, prompt, image_data)
+    
+    # 扣除积分
+    deduct_success, deduct_result = deduct_points(
+        user_id, 
+        2, 
+        'generation', 
+        f'图片生成: {user_buttons_list[button_index]["button_label"]}',
+        record_id
+    )
+    
+    if not deduct_success:
+        if record_id:
+            update_generation_record(record_id, 'failed', error_message="扣除积分失败")
+        return jsonify({"error": deduct_result})
+    
+    # 更新生成记录
+    if record_id:
+        update_generation_record(record_id, 'pending', points_deducted=2)
     
     # 处理图片
     img_base64 = image_data.split(",")[1]
@@ -1097,7 +2115,16 @@ def generate():
             print(f"流式读取警告: {e}")
         
         if not full_content:
-            return jsonify({"error": "未收到有效内容，请重试"})
+            # 生成失败，退款
+            if record_id:
+                update_generation_record(record_id, 'failed', error_message="未收到有效内容")
+                # 退款
+                add_points(user_id, 2, 'refund', '生成失败退款', record_id)
+            return jsonify({"error": "未收到有效内容，请重试，积分已退还"})
+        
+        # 生成成功
+        if record_id:
+            update_generation_record(record_id, 'success')
         
         return jsonify({
             "choices": [
@@ -1109,7 +2136,12 @@ def generate():
             ]
         })
     except Exception as e:
-        return jsonify({"error": str(e)})
+        # 生成失败，退款
+        if record_id:
+            update_generation_record(record_id, 'failed', error_message=str(e))
+            # 退款
+            add_points(user_id, 2, 'refund', '生成失败退款', record_id)
+        return jsonify({"error": f"{str(e)}，积分已退还"})
 
 if __name__ == '__main__':
     print("🚀 应用启动中...")

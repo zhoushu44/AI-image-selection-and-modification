@@ -10,7 +10,10 @@ COPY . .
 # 在容器里安装 Python 依赖（从requirements.txt读取）
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 声明容器会暴露 8000 端口（和你Flask代码里的端口保持一致）
+# 设置 Flask 生产环境
+ENV FLASK_ENV=production
+
+# 声明容器会暴露 5000 端口（和你Flask代码里的端口保持一致）
 EXPOSE 5000
 
 # 容器启动时执行的命令：运行你的主程序 app_complete.py
