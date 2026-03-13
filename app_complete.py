@@ -869,4 +869,5 @@ def generate():
 if __name__ == '__main__':
     print("🚀 应用启动中...")
     print("📱 请在浏览器中打开: http://localhost:5000")
-    app.run(port=5000, debug=False)
+    print("🌐 外部访问地址: http://<服务器IP>:5000")
+    app.run(host='0.0.0.0', port=5000, debug=False)
