@@ -1,26 +1,40 @@
-from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for, send_file
+from flask_cors import CORS
 from PIL import Image, ImageDraw
 import requests
 import base64
 import io
 import json
 import os
+import zipfile
 from supabase import create_client, Client
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
-# Supabase 配置（请替换为你自己的密钥）
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://your-project.supabase.co")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "your-anon-key")
-SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "your-secret-key")
+# 添加CORS支持
+CORS(app)
+
+# Supabase 配置（必须通过环境变量提供）
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_ANON_KEY = os.environ["SUPABASE_ANON_KEY"]
+SUPABASE_SECRET_KEY = os.environ["SUPABASE_SECRET_KEY"]
 try:
+    # 直接创建客户端，不使用自定义HTTP客户端
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
     supabase_admin: Client = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
 except Exception as e:
     print(f"Supabase 初始化警告: {e}")
-    supabase = None
-    supabase_admin = None
+    # 尝试使用环境变量方式禁用SSL验证
+    import os
+    os.environ['CURL_CA_BUNDLE'] = ''  # 禁用SSL验证
+    try:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        supabase_admin: Client = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
+    except Exception as e2:
+        print(f"Supabase 初始化第二次尝试失败: {e2}")
+        supabase = None
+        supabase_admin = None
 
 # 从数据库获取 API 配置
 def get_api_config():
@@ -414,9 +428,10 @@ LOGIN_TEMPLATE = """
                 const result = await response.json();
                 
                 if (result.success) {
-                    showSuccess('注册成功！请检查邮箱进行验证，验证后即可登录');
-                    switchTab('login');
-                    document.getElementById('loginEmail').value = email;
+                    showSuccess('注册成功！我们已向你的邮箱发送验证邮件，请点击邮件内的链接激活账号，激活后即可登录');
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 2000);
                 } else {
                     showError(result.error || '注册失败');
                 }
@@ -669,6 +684,24 @@ HTML_TEMPLATE = """
             border: 2px solid #000000;
         }
         
+        /* 按钮操作样式 */
+        .button-action {
+            background: #FFFFFF !important;
+            color: #000000 !important;
+            border: 2px solid #000000 !important;
+            padding: 8px 16px !important;
+            font-size: 0.75rem !important;
+            cursor: pointer !important;
+            transition: none !important;
+        }
+        
+        .button-action:hover {
+            background: #FFFFFF !important;
+            color: #000000 !important;
+            border: 2px solid #000000 !important;
+            padding: 8px 16px !important;
+        }
+        
         .color-picker, .width-picker {
             margin: 16px 0;
         }
@@ -714,9 +747,6 @@ HTML_TEMPLATE = """
         }
         
         .button-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
             padding: 16px;
             background: #FFFFFF;
             border: 1px solid #000000;
@@ -729,15 +759,83 @@ HTML_TEMPLATE = """
             color: #FFFFFF;
         }
         
-        .button-item span {
-            flex: 1;
-            margin-right: 16px;
+        .button-item input, .button-item textarea {
+            border: 2px solid #000000 !important;
+            font-family: 'Source Serif 4', Georgia, serif !important;
+            font-size: 1rem !important;
+            transition: none !important;
         }
         
-        .button-item button {
+        .button-item input:focus, .button-item textarea:focus {
+            border-width: 4px !important;
+            outline: none !important;
+        }
+        
+        .button-item:hover input, .button-item:hover textarea {
+            background: #FFFFFF !important;
+            color: #000000 !important;
+            border-color: #FFFFFF !important;
+        }
+        
+        .button-item:hover input:focus, .button-item:hover textarea:focus {
+            border-color: #000000 !important;
+            border-width: 4px !important;
+        }
+        
+        .button-item-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+            gap: 12px;
+        }
+        
+        .button-label-input {
+            flex: 1;
+            max-width: 300px;
+            padding: 8px 12px;
+            height: 40px;
+            box-sizing: border-box;
+            vertical-align: middle;
+        }
+        
+        .button-item-actions {
+            display: flex;
+            gap: 12px;
+        }
+        
+        .button-action {
+            height: 40px !important;
+            min-width: 60px;
+            padding: 0 16px !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            box-sizing: border-box !important;
+            vertical-align: middle;
+            background: #FFFFFF !important;
+            color: #000000 !important;
+            border: 2px solid #000000 !important;
+            font-family: 'Source Serif 4', Georgia, serif !important;
+            font-size: 0.875rem !important;
+            font-weight: 500 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.1em !important;
+            cursor: pointer !important;
+        }
+        
+        .button-action:hover {
+            background: #FFFFFF !important;
+            color: #000000 !important;
+            border: 2px solid #000000 !important;
+        }
+        
+        .button-prompt-input {
+            width: 100%;
+            min-height: 80px;
+            padding: 8px 12px;
+            box-sizing: border-box;
+            resize: vertical;
             margin: 0;
-            padding: 8px 16px;
-            font-size: 0.75rem;
         }
         
         .result-card {
@@ -882,7 +980,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="nav-bar">
         <span class="user-info">
-            <button style="background:#000000;color:#FFFFFF;border:none;padding:8px 16px;cursor:pointer;font-family:'JetBrains Mono',monospace;" onclick="openPointsModalSimple();">
+            <button id="pointsDisplay" style="background:#000000;color:#FFFFFF;border:none;padding:8px 16px;cursor:pointer;font-family:'JetBrains Mono',monospace;" onclick="openPointsModalSimple();">
                 积分: {{ current_points }}
             </button>
         </span>
@@ -972,7 +1070,8 @@ HTML_TEMPLATE = """
         <div class="column">
             <h2>生成结果</h2>
             <div style="margin-bottom:16px;">
-                <button id="clearAllResults" class="ghost" onclick="clearAllResults()" style="display:none;">清除所有结果</button>
+                <button id="clearAllResults" class="ghost" onclick="clearAllResults()" style="display:none;margin-right:16px;">清除所有结果</button>
+                <button id="downloadAllResults" class="ghost" onclick="downloadAllImages()" style="display:none;">下载所有图片</button>
             </div>
             <div id="loading" class="loading">
                 <div class="spinner"></div>
@@ -990,9 +1089,9 @@ HTML_TEMPLATE = """
             <div class="expander">
                 <div class="expander-header" onclick="toggleExpander('addBtn')">
                     <span>添加新功能</span>
-                    <span id="addBtnToggle">▼</span>
+                    <span id="addBtnToggle">▶</span>
                 </div>
-                <div id="addBtnContent" class="expander-content">
+                <div id="addBtnContent" class="expander-content" style="display:none;">
                     <div style="margin:16px 0;">
                         <label>按钮名称</label>
                         <input type="text" id="newBtnName" placeholder="输入按钮名称" style="margin-top:8px;max-width:none;">
@@ -1008,14 +1107,20 @@ HTML_TEMPLATE = """
             <div class="expander">
                 <div class="expander-header" onclick="toggleExpander('buttonsList')">
                     <span>已添加的按钮</span>
-                    <span id="buttonsListToggle">▼</span>
+                    <span id="buttonsListToggle">▶</span>
                 </div>
-                <div id="buttonsListContent" class="expander-content">
+                <div id="buttonsListContent" class="expander-content" style="display:none;">
                     {% if buttons %}
                     {% for btn in buttons %}
                     <div class="button-item" data-button-id="{{ btn.id }}">
-                        <span><strong>{{ btn.button_label }}</strong>: {{ btn.prompt_text }}</span>
-                        <button class="danger" onclick="deleteButton('{{ btn.id }}')">删除</button>
+                        <div class="button-item-header">
+                            <input type="text" class="button-label-input" value="{{ btn.button_label }}" placeholder="按钮名称">
+                            <div class="button-item-actions">
+                                <button class="button-action" onclick="deleteButton('{{ btn.id }}')">删除</button>
+                                <button class="button-action" onclick="saveButton('{{ btn.id }}')">保存</button>
+                            </div>
+                        </div>
+                        <textarea class="button-prompt-input" placeholder="提示词">{{ btn.prompt_text }}</textarea>
                     </div>
                     {% endfor %}
                     {% else %}
@@ -1365,6 +1470,41 @@ HTML_TEMPLATE = """
                 location.reload();
             });
         }
+        
+        function saveButton(buttonId) {
+            const buttonItem = document.querySelector(`[data-button-id="${buttonId}"]`);
+            const labelInput = buttonItem.querySelector('.button-label-input');
+            const promptInput = buttonItem.querySelector('.button-prompt-input');
+            
+            const newLabel = labelInput.value.trim();
+            const newPrompt = promptInput.value.trim();
+            
+            if (!newLabel || !newPrompt) {
+                alert('按钮名称和提示词不能为空');
+                return;
+            }
+            
+            fetch('/update_button', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    button_id: buttonId, 
+                    button_label: newLabel, 
+                    prompt_text: newPrompt 
+                })
+            }).then(response => response.json())
+              .then(result => {
+                  if (result.success) {
+                      alert('按钮更新成功');
+                      location.reload();
+                  } else {
+                      alert('更新失败: ' + result.error);
+                  }
+              })
+              .catch(e => {
+                  alert('网络错误，请重试');
+              });
+        }
 
         function updateGenerateButtons() {
             fetch('/get_buttons')
@@ -1378,6 +1518,57 @@ HTML_TEMPLATE = """
                         generateButtons.appendChild(button);
                     });
                 });
+        }
+        
+        async function downloadAllImages() {
+            try {
+                const resultCards = document.querySelectorAll('.result-card');
+                const imageUrls = [];
+                
+                resultCards.forEach(card => {
+                    const images = card.querySelectorAll('img');
+                    images.forEach(img => {
+                        if (img.src && img.src.startsWith('http')) {
+                            imageUrls.push(img.src);
+                        }
+                    });
+                });
+                
+                if (imageUrls.length === 0) {
+                    alert('没有可下载的图片');
+                    return;
+                }
+                
+                // 向服务器发送请求，获取打包的图片
+                const response = await fetch('/download_all_images', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ image_urls: imageUrls })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('下载失败');
+                }
+                
+                // 创建下载链接
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'generated_images.zip';
+                document.body.appendChild(a);
+                a.click();
+                
+                // 清理
+                setTimeout(() => {
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }, 100);
+            } catch (e) {
+                alert('下载失败: ' + e.message);
+            }
         }
 
         // 生成功能
@@ -1399,6 +1590,7 @@ HTML_TEMPLATE = """
             
             resultSection.appendChild(loadingDiv);
             document.getElementById('clearAllResults').style.display = 'inline-block';
+            document.getElementById('downloadAllResults').style.display = 'inline-block';
             resultSection.style.display = 'block';
             
             try {
@@ -1502,6 +1694,7 @@ HTML_TEMPLATE = """
             resultSection.innerHTML = '<p class="hint">选择功能按钮后，生成结果将在此显示</p>';
             resultCount = 0;
             document.getElementById('clearAllResults').style.display = 'none';
+            document.getElementById('downloadAllResults').style.display = 'none';
         }
 
         // 初始化
@@ -1749,6 +1942,19 @@ def delete_user_button(user_id, button_id):
         print(f"删除用户按钮错误: {e}")
         return False
 
+def update_user_button(user_id, button_id, button_label, prompt_text):
+    """更新用户的按钮"""
+    try:
+        update_data = {
+            'button_label': button_label,
+            'prompt_text': prompt_text
+        }
+        supabase_admin.table('user_buttons').update(update_data).eq('user_id', user_id).eq('id', button_id).execute()
+        return True, None
+    except Exception as e:
+        print(f"更新用户按钮错误: {e}")
+        return False, str(e)
+
 # ==================== 登录检查装饰器 ====================
 
 def login_required(f):
@@ -1981,6 +2187,24 @@ def get_buttons_route():
     buttons_list = get_user_buttons(user_id)
     return jsonify(buttons_list)
 
+@app.route('/update_button', methods=['POST'])
+@login_required
+def update_button():
+    data = request.json
+    user_id = session['user'].get('user_id')
+    button_id = data.get('button_id')
+    button_label = data.get('button_label')
+    prompt_text = data.get('prompt_text')
+    
+    if not button_id or not button_label or not prompt_text:
+        return jsonify({"success": False, "error": "缺少必要参数"})
+    
+    success, error = update_user_button(user_id, button_id, button_label, prompt_text)
+    if success:
+        return jsonify({"success": True})
+    else:
+        return jsonify({"success": False, "error": error})
+
 @app.route('/draw_box', methods=['POST'])
 @login_required
 def draw_box():
@@ -2142,6 +2366,58 @@ def generate():
             # 退款
             add_points(user_id, 2, 'refund', '生成失败退款', record_id)
         return jsonify({"error": f"{str(e)}，积分已退还"})
+
+@app.route('/download_all_images', methods=['POST'])
+@login_required
+def download_all_images():
+    """下载所有生成的图片，打包为ZIP文件"""
+    try:
+        data = request.json
+        image_urls = data.get('image_urls', [])
+        
+        if not image_urls:
+            return jsonify({"error": "没有要下载的图片"}), 400
+        
+        # 创建临时目录保存图片
+        temp_dir = 'temp_images'
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir)
+        
+        # 创建ZIP文件
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for i, url in enumerate(image_urls):
+                try:
+                    # 下载图片
+                    response = requests.get(url, timeout=10, verify=False)  # 禁用SSL验证
+                    response.raise_for_status()
+                    
+                    # 保存图片到ZIP文件
+                    image_name = f'image_{i+1}.png'
+                    zip_file.writestr(image_name, response.content)
+                except Exception as e:
+                    print(f"下载图片失败 {url}: {e}")
+                    continue
+        
+        # 清理临时目录
+        if os.path.exists(temp_dir):
+            for file in os.listdir(temp_dir):
+                os.remove(os.path.join(temp_dir, file))
+            os.rmdir(temp_dir)
+        
+        # 重置文件指针
+        zip_buffer.seek(0)
+        
+        # 返回ZIP文件
+        return send_file(
+            zip_buffer,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name='generated_images.zip'
+        )
+    except Exception as e:
+        print(f"下载所有图片失败: {e}")
+        return jsonify({"error": f"下载失败: {str(e)}"}), 500
 
 if __name__ == '__main__':
     print("🚀 应用启动中...")
