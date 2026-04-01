@@ -56,6 +56,42 @@ def get_api_config():
         "model": "gemini-3.1-flash-image-square"
     }
 
+def ensure_minimum_image_size(image_data, minimum_size=14):
+    """确保图片尺寸满足第三方接口的最小要求"""
+    try:
+        if not image_data.startswith('data:image/') or ',' not in image_data:
+            return image_data
+
+        header, encoded = image_data.split(',', 1)
+        img_bytes = base64.b64decode(encoded)
+        img = Image.open(io.BytesIO(img_bytes))
+        img.load()
+
+        if img.width >= minimum_size and img.height >= minimum_size:
+            return image_data
+
+        scale = max(minimum_size / img.width, minimum_size / img.height)
+        new_width = max(minimum_size, int(round(img.width * scale)))
+        new_height = max(minimum_size, int(round(img.height * scale)))
+        resized = img.resize((new_width, new_height), Image.LANCZOS)
+
+        output_format = 'PNG'
+        mime_type = 'image/png'
+        if header.startswith('data:image/jpeg') or header.startswith('data:image/jpg'):
+            output_format = 'JPEG'
+            mime_type = 'image/jpeg'
+            if resized.mode not in ('RGB', 'L'):
+                resized = resized.convert('RGB')
+        elif resized.mode in ('RGBA', 'P'):
+            resized = resized.convert('RGBA')
+
+        buf = io.BytesIO()
+        resized.save(buf, format=output_format)
+        return f'data:{mime_type};base64,' + base64.b64encode(buf.getvalue()).decode('utf-8')
+    except Exception as e:
+        print(f"图片尺寸兜底处理失败: {e}")
+        return image_data
+
 # 状态存储
 current_image = None
 current_image_bytes = None
@@ -1524,8 +1560,20 @@ HTML_TEMPLATE = """
             try {
                 const resultCards = document.querySelectorAll('.result-card');
                 const imageUrls = [];
-                
+
                 resultCards.forEach(card => {
+                    const storedUrls = card.dataset.imageUrls;
+                    if (storedUrls) {
+                        try {
+                            JSON.parse(storedUrls).forEach(url => {
+                                if (url && url.startsWith('http')) {
+                                    imageUrls.push(url);
+                                }
+                            });
+                        } catch (e) {
+                        }
+                    }
+
                     const images = card.querySelectorAll('img');
                     images.forEach(img => {
                         if (img.src && img.src.startsWith('http')) {
@@ -1533,25 +1581,27 @@ HTML_TEMPLATE = """
                         }
                     });
                 });
-                
-                if (imageUrls.length === 0) {
+
+                const uniqueImageUrls = [...new Set(imageUrls)];
+
+                if (uniqueImageUrls.length === 0) {
                     alert('没有可下载的图片');
                     return;
                 }
-                
+
                 // 向服务器发送请求，获取打包的图片
                 const response = await fetch('/download_all_images', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ image_urls: imageUrls })
+                    body: JSON.stringify({ image_urls: uniqueImageUrls })
                 });
-                
+
                 if (!response.ok) {
                     throw new Error('下载失败');
                 }
-                
+
                 // 创建下载链接
                 const blob = await response.blob();
                 const url = window.URL.createObjectURL(blob);
@@ -1560,7 +1610,7 @@ HTML_TEMPLATE = """
                 a.download = 'generated_images.zip';
                 document.body.appendChild(a);
                 a.click();
-                
+
                 // 清理
                 setTimeout(() => {
                     window.URL.revokeObjectURL(url);
@@ -1638,12 +1688,13 @@ HTML_TEMPLATE = """
                         let content = result.choices[0].message.content;
                         content = content.replace(/<img /g, '<img referrerpolicy="no-referrer" ');
                         content = content.replace(/!\[.*?\]\(`?([^`\)]+)`?\)/g, '<img src="$1" referrerpolicy="no-referrer" style="max-width:100%;height:auto;margin:16px 0;">');
-                        
+
                         resultDiv.innerHTML = `
                             <h4>结果 #${currentResultId}</h4>
                             <div class="result-content">${content}</div>
                             <button style="margin-top:16px;" onclick="downloadResultWithContent('${encodeURIComponent(content)}')">下载结果</button>
                         `;
+                        resultDiv.dataset.imageUrls = JSON.stringify(result.image_urls || []);
                         window[`result_${currentResultId}`] = result;
                     }
                 }
@@ -2237,86 +2288,127 @@ def generate():
     data = request.json
     button_index = data["button_index"]
     image_data = data["image"]
-    
+
     # 从数据库获取 API 配置
     api_config = get_api_config()
-    
+
     # 获取用户信息
     user_id = session['user'].get('user_id')
-    
+
     if not user_id:
         return jsonify({"error": "无法获取用户信息"})
-    
+
     # 检查积分是否足够
     user_points = get_user_points(user_id)
     if not user_points or user_points['current_points'] < 2:
         return jsonify({"error": "积分不足，请先领取每日积分或充值"})
-    
+
     # 获取用户的按钮列表
     user_buttons_list = get_user_buttons(user_id)
     if button_index >= len(user_buttons_list):
         return jsonify({"error": "按钮索引无效"})
-    
+
     # 获取提示词
     prompt = user_buttons_list[button_index]["prompt_text"]
-    
+
     # 创建生成记录
     record_id = create_generation_record(user_id, prompt, image_data)
-    
+
     # 扣除积分
     deduct_success, deduct_result = deduct_points(
-        user_id, 
-        2, 
-        'generation', 
+        user_id,
+        2,
+        'generation',
         f'图片生成: {user_buttons_list[button_index]["button_label"]}',
         record_id
     )
-    
+
     if not deduct_success:
         if record_id:
             update_generation_record(record_id, 'failed', error_message="扣除积分失败")
         return jsonify({"error": deduct_result})
-    
+
     # 更新生成记录
     if record_id:
         update_generation_record(record_id, 'pending', points_deducted=2)
-    
-    # 处理图片
-    img_base64 = image_data.split(",")[1]
-    
+
     # 构建请求
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_config['api_key']}"
     }
-    
-    payload = {
-        "model": api_config['model'],
-        "stream": True,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
+
+    is_volcengine_image_api = '/images/generations' in api_config['api_url']
+
+    try:
+        if is_volcengine_image_api:
+            safe_image_data = ensure_minimum_image_size(image_data, minimum_size=14)
+            payload = {
+                "model": api_config['model'],
+                "prompt": prompt,
+                "image": safe_image_data,
+                "sequential_image_generation": "disabled",
+                "response_format": "url",
+                "size": "2K",
+                "stream": False,
+                "watermark": True
+            }
+
+            response = requests.post(api_config['api_url'], headers=headers, json=payload, timeout=300)
+            response.raise_for_status()
+            result = response.json()
+            image_urls = [item.get('url') for item in result.get('data', []) if item.get('url')]
+
+            if not image_urls:
+                if record_id:
+                    update_generation_record(record_id, 'failed', error_message="未收到有效图片地址")
+                    add_points(user_id, 2, 'refund', '生成失败退款', record_id)
+                return jsonify({"error": "未收到有效图片地址，请重试，积分已退还"})
+
+            content = '\n\n'.join([f'![generated_image_{index + 1}]({url})' for index, url in enumerate(image_urls)])
+
+            if record_id:
+                update_generation_record(record_id, 'success', image_data=image_urls[0])
+
+            return jsonify({
+                "choices": [
                     {
-                        "type": "text",
-                        "text": prompt
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{img_base64}"
+                        "message": {
+                            "content": content
                         }
                     }
-                ]
-            }
-        ],
-        "max_tokens": 2000
-    }
-    
-    try:
+                ],
+                "image_urls": image_urls,
+                "provider_response": result
+            })
+
+        img_base64 = image_data.split(",")[1]
+        payload = {
+            "model": api_config['model'],
+            "stream": True,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{img_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 2000
+        }
+
         response = requests.post(api_config['api_url'], headers=headers, json=payload, stream=True, timeout=300)
         response.raise_for_status()
-        
+
         full_content = ""
         try:
             for line in response.iter_lines():
@@ -2337,19 +2429,16 @@ def generate():
                                 pass
         except Exception as e:
             print(f"流式读取警告: {e}")
-        
+
         if not full_content:
-            # 生成失败，退款
             if record_id:
                 update_generation_record(record_id, 'failed', error_message="未收到有效内容")
-                # 退款
                 add_points(user_id, 2, 'refund', '生成失败退款', record_id)
             return jsonify({"error": "未收到有效内容，请重试，积分已退还"})
-        
-        # 生成成功
+
         if record_id:
             update_generation_record(record_id, 'success')
-        
+
         return jsonify({
             "choices": [
                 {
@@ -2360,10 +2449,8 @@ def generate():
             ]
         })
     except Exception as e:
-        # 生成失败，退款
         if record_id:
             update_generation_record(record_id, 'failed', error_message=str(e))
-            # 退款
             add_points(user_id, 2, 'refund', '生成失败退款', record_id)
         return jsonify({"error": f"{str(e)}，积分已退还"})
 
@@ -2374,47 +2461,58 @@ def download_all_images():
     try:
         data = request.json
         image_urls = data.get('image_urls', [])
-        
+
         if not image_urls:
             return jsonify({"error": "没有要下载的图片"}), 400
-        
-        # 创建临时目录保存图片
-        temp_dir = 'temp_images'
-        if not os.path.exists(temp_dir):
-            os.makedirs(temp_dir)
-        
-        # 创建ZIP文件
+
         zip_buffer = io.BytesIO()
+        download_failures = []
+        downloaded_count = 0
+
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             for i, url in enumerate(image_urls):
                 try:
-                    # 下载图片
-                    response = requests.get(url, timeout=10, verify=False)  # 禁用SSL验证
+                    response = requests.get(url, timeout=20)
                     response.raise_for_status()
-                    
-                    # 保存图片到ZIP文件
-                    image_name = f'image_{i+1}.png'
+
+                    content_type = (response.headers.get('Content-Type') or '').lower()
+                    if 'image/png' in content_type:
+                        extension = 'png'
+                    elif 'image/webp' in content_type:
+                        extension = 'webp'
+                    elif 'image/gif' in content_type:
+                        extension = 'gif'
+                    else:
+                        extension = 'jpg'
+
+                    image_name = f'image_{downloaded_count + 1}.{extension}'
                     zip_file.writestr(image_name, response.content)
+                    downloaded_count += 1
                 except Exception as e:
                     print(f"下载图片失败 {url}: {e}")
+                    download_failures.append({
+                        "url": url,
+                        "error": str(e)
+                    })
                     continue
-        
-        # 清理临时目录
-        if os.path.exists(temp_dir):
-            for file in os.listdir(temp_dir):
-                os.remove(os.path.join(temp_dir, file))
-            os.rmdir(temp_dir)
-        
-        # 重置文件指针
+
+        if downloaded_count == 0:
+            return jsonify({
+                "error": "所有图片下载失败",
+                "failures": download_failures
+            }), 502
+
         zip_buffer.seek(0)
-        
-        # 返回ZIP文件
-        return send_file(
+
+        response = send_file(
             zip_buffer,
             mimetype='application/zip',
             as_attachment=True,
             download_name='generated_images.zip'
         )
+        response.headers['X-Downloaded-Count'] = str(downloaded_count)
+        response.headers['X-Failed-Count'] = str(len(download_failures))
+        return response
     except Exception as e:
         print(f"下载所有图片失败: {e}")
         return jsonify({"error": f"下载失败: {str(e)}"}), 500
